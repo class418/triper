@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>5ch互換トリップ生成（静的ページ）</title>
+</head>
+<body>
+  <h1>5ch互換トリップ生成（静的）</h1>
+  <p>入力例: <code>名無し#password</code> → <code>名無し◆xxxxxxx</code></p>
+
+  <input id="input" placeholder="名前#鍵 を入力" size="50">
+  <button id="go">生成</button>
+  <pre id="out"></pre>
+
+  <!-- Shift_JIS 変換用（encoding-japanese） -->
+  <script src="https://unpkg.com/encoding-japanese@1.0.30/encoding.js"></script>
+
+  <!-- unix crypt(3) 実装（DES-based） -->
+  <script src="https://unpkg.com/unix-crypt-td-js@1.1.4/dist/unix-crypt-td.min.js"></script>
+
+<script>
+(function(){
+  // 参考: wakaba 等の実装に合わせたソルト生成ルールを再現する。
+  // salt = (key + 'H.').substr(1,2) で取り出し、範囲外は '.' に置換、
+  // さらに ':;<=>?@[\\]^_`' を 'ABCDEFGabcdef' に transliterate する。
+
+  const translitFrom = ':;<=>?@[\\]^_`';
+  const translitTo   = 'ABCDEFGabcdef'; // wakaba/p5ch 実装での置換テーブル
+
+  function makeSaltFromKey(key) {
+    const k = (key + 'H.');
+    // substr(1,2) の意味: 1文字目(0ベースじゃない) の次から2文字？ 実装互換のため以下のように取得
+    // Perl の substr($s,1,2) は 0-origin で位置1 から長さ2 を返す -> JS の s.substr(1,2)
+    let s = k.substr(1,2);
+    // replace out-of-range characters with '.'
+    // Acceptable range in many implementations: '.' (0x2e) .. 'z' (0x7a)
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      const code = ch.charCodeAt(0);
+      if (code < 0x2e || code > 0x7a) {
+        out += '.';
+      } else {
+        out += ch;
+      }
+    }
+    // transliterate certain punctuation (map ':;<=>?@[\\]^_`' -> 'ABCDEFGabcdef')
+    let res = '';
+    for (let i = 0; i < out.length; i++) {
+      const idx = translitFrom.indexOf(out[i]);
+      if (idx !== -1) {
+        res += translitTo[idx];
+      } else {
+        res += out[i];
+      }
+    }
+    // If result shorter than 2, pad with '.'
+    while (res.length < 2) res += '.';
+    return res;
+  }
+
+  // Shift_JIS バイト列を得て、binary string (byte values) に変換する
+  function toSjisBytes(str) {
+    // encoding.js provides Encoding.convert
+    // returns array of bytes when type:'array'
+    // Note: encoding-japanese expects UTF-8 input (JS string OK)
+    const arr = Encoding.convert(str, {to: 'SJIS', type: 'array'});
+    return arr;
+  }
+
+  // crypt3 expects a string of bytes where each byte is used directly.
+  // unixCryptTdJs exposes unixCrypt (salt, key) as function that accepts JS string:
+  // but the package expects normal JS string bytes in 0..255 (not UTF-16).
+  // So build binary string from SJIS bytes.
+  function sjisBytesToBinaryString(bytes) {
+    return String.fromCharCode.apply(null, bytes);
+  }
+
+  // Generate classic trip: given key (the part after #), produce trip string like '◆xxxx'
+  function generateClassicTrip(key) {
+    // 1) make salt
+    const salt = makeSaltFromKey(key);
+
+    // 2) convert key to Shift_JIS bytes, then to binary string for unix-crypt implementation
+    const sjisBytes = toSjisBytes(key);
+    const bin = sjisBytesToBinaryString(sjisBytes);
+
+    // 3) call unix crypt(3) with salt
+    // unix-crypt-td-js provides unixCrypt( key, salt ) (common order is key, salt)
+    // (package exposes window.unixCrypt)
+    const cryptOut = window.unixCrypt ? window.unixCrypt(bin, salt) : null;
+    if (!cryptOut) return null;
+
+    // 4) trip display: typical 10文字（実装差あり）。2ch では 10桁をよく使うので末尾10文字を取って表示
+    // cryptOut looks like: <salt><crypted> often; we extract the last 10 chars.
+    const trip = cryptOut.slice(-10);
+    return '◆' + trip;
+  }
+
+  // UI
+  document.getElementById('go').addEventListener('click', () => {
+    const v = document.getElementById('input').value;
+    const p = v.indexOf('#');
+    const outEl = document.getElementById('out');
+    if (p === -1) { outEl.textContent = '入力に # が含まれていません'; return; }
+    const name = v.substring(0,p);
+    const key  = v.substring(p+1);
+    try {
+      const trip = generateClassicTrip(key);
+      if (trip === null) {
+        outEl.textContent = 'crypt 関数が見つかりません（ライブラリ読み込みを確認）';
+      } else {
+        outEl.textContent = name + trip;
+      }
+    } catch (e) {
+      outEl.textContent = 'エラー: ' + e.message;
+    }
+  });
+
+})();
+</script>
+</body>
+</html>
