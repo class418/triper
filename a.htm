@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Tripcode Generator</title>
+</head>
+<body>
+  <input id="input" placeholder="名前#パス">
+  <button onclick="gen()">生成</button>
+  <p id="result"></p>
+
+<script src="https://cdn.jsdelivr.net/gh/davidjamesstone/js-crypt/crypt.js"></script>
+<script>
+function gen() {
+  let val = document.getElementById("input").value;
+  let idx = val.indexOf("#");
+  if (idx === -1) {
+    document.getElementById("result").innerText = val;
+    return;
+  }
+  let name = val.slice(0, idx);
+  let trip = val.slice(idx + 1);
+
+  // パスからソルトを決める（5chと同じ規則）
+  let salt = (trip + "H.").substr(1, 2);
+  salt = salt.replace(/[^\.-z]/g, ".");
+  salt = salt.replace(/:/g, "A");
+
+  // crypt() 実行 (DES)
+  let tripcode = crypt(trip, salt).substr(-10);
+
+  document.getElementById("result").innerText = name + "◆" + tripcode;
+}
+</script>
+</body>
+</html>
